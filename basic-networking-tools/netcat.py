@@ -1,47 +1,96 @@
 import argparse
 import socket
+import ssl
 import shlex
 import subprocess
 import sys
 import textwrap
 import threading
 
-# set up the execution function
-# this function will receive a command, run it and will return output as string
+"""
+NetCat Tool - A Python implementation of the popular netcat utility.
+---------------------------------------------------------
+Functionality:
+This tool is designed for secure network communication, providing features like:
+1. Listening on a port to accept incoming connections.
+2. Sending data to a remote target.
+3. Executing system commands on the listener side.
+4. Uploading files securely.
+5. Opening a command shell for interactive communication.
+
+Key Features:
+- SSL Encryption: Secures communication using user-provided certificates.
+- Multithreading: Handles multiple connections simultaneously.
+- Customizable: Allows users to upload files, execute commands, or run a command shell.
+
+Usage Examples:
+1. Start a listener on port 5555 with a command shell:
+   python netcat.py -t 127.0.0.1 -p 5555 -l -c
+
+2. Upload a file to the listener:
+   python netcat.py -t 127.0.0.1 -p 5555 -l -u myfile.txt
+
+3. Execute a command on the listener:
+   python netcat.py -t 127.0.0.1 -p 5555 -l -e "ls -la"
+
+4. Send data to a remote listener:
+   echo "Hello, World!" | python netcat.py -t 127.0.0.1 -p 5555
+
+Note:
+- Replace `Your_cert.pem` and `Your_key.pem` with your SSL certificate and key files.
+- Always use this tool responsibly and with permission.
+"""
+
+# Function to execute shell commands
 def execute(cmd):
+    """
+    Executes a shell command and returns the output.
+    Args:
+        cmd (str): Command to execute.
+    Returns:
+        str: Command output.
+    """
     cmd = cmd.strip()
     if not cmd:
         return
-    output = subprocess.check_output(shlex.split(cmd), stderr = subprocess.STDOUT)
+    output = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT)
     return output.decode()
 
+
 class NetCat:
-    #initialise netcat object with arguments from command line
-    def __init__(self, args, buffer = None):
+    def __init__(self, args, buffer=None):
+        """
+        Initializes the NetCat object.
+        Args:
+            args (Namespace): Parsed command-line arguments.
+            buffer (bytes): Data to send when connecting to a target.
+        """
         self.args = args
         self.buffer = buffer
-        #create a socket object
+        # Create a secure SSL socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket = ssl.wrap_socket(
+            self.socket, certfile="Your_cert.pem", keyfile="Your_key.pem", server_side=self.args.listen
+        )
 
-    #run the entry point for managing netcat object
     def run(self):
-        # if setting up a listner we call listen method else call send method
+        """
+        Starts the NetCat tool in either listen or send mode.
+        """
         if self.args.listen:
             self.listen()
         else:
             self.send()
-        
-    # send method
+
     def send(self):
-        #connect to target port
+        """
+        Connects to a remote target and facilitates communication.
+        """
         self.socket.connect((self.args.target, self.args.port))
-        # if we have buffer send that to the target first
         if self.buffer:
             self.socket.send(self.buffer)
-            # set up try/catch block so we can manually close the connection with CTRL+C
         try:
-            #loop to receive data from target
             while True:
                 recv_len = 1
                 response = ''
@@ -49,90 +98,107 @@ class NetCat:
                     data = self.socket.recv(4096)
                     recv_len = len(data)
                     response += data.decode()
-                    #if there is no more data, break the loop
                     if recv_len < 4096:
                         break
                 if response:
                     print(response)
-                    buffer = input('> ')
-                    buffer += '\n'
-                    self.socket.send(buffer.encode()) #send the input from above response and continue the loop
+                    buffer = input("> ")  # Accept user input
+                    buffer += "\n"
+                    self.socket.send(buffer.encode())
         except KeyboardInterrupt:
-            print('User terminated.')
+            print("User terminated the connection.")
             self.socket.close()
             sys.exit()
 
-    # method that executes when the program runs as a listner:
     def listen(self):
+        """
+        Listens for incoming connections and starts a new thread for each client.
+        """
         self.socket.bind((self.args.target, self.args.port))
         self.socket.listen(5)
+        print(f"[*] Listening on {self.args.target}:{self.args.port}")
         while True:
             client_socket, _ = self.socket.accept()
-            client_thread = threading.Thread(
-                target = self.handle, args = (client_socket,)
-            )
+            # Start a new thread to handle the client
+            client_thread = threading.Thread(target=self.handle, args=(client_socket,))
             client_thread.start()
-    
-    # implementation of logic to perform file uploads, execute commands, and create interactive shell
+
     def handle(self, client_socket):
+        """
+        Handles a client connection based on the specified mode (upload, execute, or command shell).
+        Args:
+            client_socket (socket): The client socket.
+        """
         if self.args.execute:
+            # Execute a specified command and send the output
             output = execute(self.args.execute)
             client_socket.send(output.encode())
-        
+
         elif self.args.upload:
-            file_buffer = b''
+            # Receive a file from the client and save it
+            file_buffer = b""
             while True:
                 data = client_socket.recv(4096)
                 if data:
                     file_buffer += data
                 else:
                     break
-            with open(self.args.upload, 'wb') as f:
+            with open(self.args.upload, "wb") as f:
                 f.write(file_buffer)
-            message = f'Saved file {self.args.upload}'
+            message = f"Saved file {self.args.upload}"
             client_socket.send(message.encode())
 
         elif self.args.command:
-            cmd_buffer = b''
+            # Start a command shell for interactive input
+            cmd_buffer = b""
             while True:
                 try:
-                    client_socket.send(b'NETCAT: #> ')
-                    while '\n' not in cmd_buffer.decode():
+                    client_socket.send(b"NETCAT: #> ")
+                    while "\n" not in cmd_buffer.decode():
                         cmd_buffer += client_socket.recv(64)
                     response = execute(cmd_buffer.decode())
                     if response:
                         client_socket.send(response.encode())
-                    cmd_buffer = b''
+                    cmd_buffer = b""
                 except Exception as e:
-                    print(f'server killed {e}')
+                    print(f"Server killed: {e}")
+                    self.socket.close()
                     sys.exit()
 
-# here we are using check_output method, which runs a command on local OS and then return output from that command
-# main block responsible for handling command line arguments and calling rest of the functions
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description = 'Netcat tool',
-        formatter_class = argparse.RawDescriptionHelpFormatter,
-        epilog = textwrap.dedent('''Example:
-        netcat.py -t 192.168.1.108 -p 5555 -l -c
-        netcat.py -t 192.168.1.108 -p 5555 -l -c -u=mytest.txt
-        netcat.py -t 192.168.1.108 -p 5555 -l -c -e=\"cat/etc/passwd\"
-        echo 'ABC' | ./netcat.py -t 192.168.1.108 -p 135
-        netcat.py -t 192.168.1.108 -p 5555 
-       ''' )
+        description="Netcat tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """
+            Example usage:
+            (1) Listen on a port with a command shell:
+            python netcat.py -t 127.0.0.1 -p 5555 -l -c
+            
+            (2) Upload a file to a listener:
+            python netcat.py -t 127.0.0.1 -p 5555 -l -u=myfile.txt
+
+            (3) Execute a command on a listener:
+            python netcat.py -t 127.0.0.1 -p 5555 -l -e "ls -la"
+
+            (4) Connect to a listener and send data:
+            echo "Hello" | python netcat.py -t 127.0.0.1 -p 5555
+            """
+        ),
     )
-    # -c, -r, -u and -l applies only to listner, -t and -p define target listner
-    parser.add_argument('-c', '--command', action = 'store_true', help = 'command shell') # -c sets up an interative shell
-    parser.add_argument('-e', '--execute', help = 'execute specified command') # -e executes and specific command
-    parser.add_argument('-l' '--listen', action = 'store_true', help = 'listen') # -l indicated that a listner should be set up
-    parser.add_argument('-p', '--port', type = int, default = 5555, help = 'specified port') # -p specifies a port on which to communicate
-    parser.add_argument('-t', '--target', default = 192.168.1.203, help = 'specified ip') # -t specifies target ip
-    parser.add_argument('-u', '--upload', help = 'upload file') # -u specifies name of file to upload
+    parser.add_argument("-c", "--command", action="store_true", help="Open a command shell")
+    parser.add_argument("-e", "--execute", help="Execute a specified command")
+    parser.add_argument("-l", "--listen", action="store_true", help="Listen for incoming connections")
+    parser.add_argument("-p", "--port", type=int, default=5555, help="Target port")
+    parser.add_argument("-t", "--target", default="127.0.0.1", help="Target IP address")
+    parser.add_argument("-u", "--upload", help="Upload a file to the specified destination")
+
     args = parser.parse_args()
     if args.listen:
-        buffer = '' #if we are setting it as listner we invoke netcat object with empty string, otherwise we will send buffer content from stdin
+        buffer = b""
     else:
-        buffer = sys.stdin.read()
-    nc = NetCat(args, buffer.encode())
+        buffer = sys.stdin.read().encode()
+
+    nc = NetCat(args, buffer)
     nc.run()
-            
