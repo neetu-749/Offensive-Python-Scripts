@@ -15,7 +15,7 @@
 ---
 
 ## **Introduction**
-This repository is designed for those who want to explore and experiment with offensive security techniques using Python. From basic networking tools to advanced Windows privilege escalation, it offers hands-on scripts to learn and practice cybersecurity concepts.
+This repository is designed for those who want to explore and experiment with offensive security techniques using Python. From basic networking tools to advanced Windows privilege escalation, it offers hands-on scripts to learn and practice cybersecurity concepts!
 
 ---
 
