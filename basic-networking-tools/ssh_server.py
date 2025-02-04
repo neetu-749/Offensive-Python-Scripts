@@ -4,7 +4,7 @@ import socket
 import sys
 import threading
 
-# Get the current working directory
+# Get current working directory
 CWD = os.path.dirname(os.path.realpath(__file__))
 
 # Load SSH private key for server authentication
