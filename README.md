@@ -24,7 +24,7 @@ Here’s an overview of the folders in this repository:
 - **basic-networking-tools**  
   Scripts for TCP/UDP clients and servers, netcat, SSH tunneling, and TCP proxying.  
 
-- **writing-a-sniffer**  
+- **sniffing-tools**  
   Tools for network sniffing, UDP host discovery, IP decoding, and ICMP packet analysis.  
 
 - **owning-the-network-with-scapy**  
